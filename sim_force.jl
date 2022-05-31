@@ -17,7 +17,7 @@ function sim_force(weights::Matrix{Float64},
 	@unpack dt, simulation_time, learning = net
 	@unpack folder, save_weights, save_states, save_network, save_timestep = store
 	@unpack Ne, Ni = weights_params
-	@unpack G, Q, lambda, RLS_timestep, using_phones, readout, target_signs = FORCE
+	@unpack G, Q1, Q2, lambda, RLS_delay, RLS_timestep, using_phones, readout, target_signs = FORCE
 	@unpack neurons, ft = spikes
 	
 	savepoints = SpikeTimit.get_savepoints(transcriptions, 
@@ -73,13 +73,15 @@ function sim_force(weights::Matrix{Float64},
 	r = zeros(Ncells) #spiking rate vector
 	hr = zeros(Ncells) #spiking rate auxiliary term for double exponential
 	cd = zeros(Ncells)
-	feedback = zeros(Ncells) #feedback vector
+	feedback1 = zeros(Ncells) #feedback vector
+	feedback2 = zeros(Ncells)
 
 	z = zeros(Nsigns) #approximant
 	err = zeros(Nsigns) #error vector
 
 	P = Matrix(I,Ncells,Ncells)*lambda^-1 #inverse of the correlation Matrix
-	E = (2*rand(Ncells,Nsigns).-1).*Q #approximant encoding matrix
+	E1 = (2*rand(Ncells,Nsigns).-1).*Q1 #approximant encoding matrix
+	E2 = (2*rand(Ncells,Nsigns).-1).*Q2
 	weights = weights.*G #static synaptic connectivity matrix
 
 	#Simulation
@@ -162,7 +164,7 @@ function sim_force(weights::Matrix{Float64},
     nzforEtoAll  = [findall(weights[nn,:].!=0) for nn = 1:Ne] #for E neurons lists All postsynaptic neurons
     nzforItoAll  = [findall(weights[nn,:].!=0) for nn = Ne+1:Ncells] #for I neurons lists All postsynaptic neurons
 
-	accuracy_list = Vector{Bool}()
+	apprxs = zeros(Nsteps,Nsigns)
 	counter = 0
 
 	#begin main simulation loop
@@ -215,7 +217,8 @@ function sim_force(weights::Matrix{Float64},
 		fill!(forwardInputsE,0.)
 		fill!(forwardInputsI,0.)
 		fill!(spiked,false)
-		feedback .= E*z
+		feedback_ex .= E1*z
+		feedback_inh .= E2*z
 
 		#update single cells
 		for cc = 1:Ncells
@@ -248,14 +251,14 @@ function sim_force(weights::Matrix{Float64},
 				gi = (xidecay[cc] - xirise[cc])/(tauidecay - tauirise);# +feedback[cc];
 
 				if cc <= Ne #excitatory neuron (eif), has adaptation
-					dv = (vleake - v[cc] + deltathe*exp((v[cc]-vth[cc])/deltathe))/taue + (ge*(erev-v[cc]) + gi*(irev-v[cc]) - wadapt[cc] + feedback[cc])/C; # voltage dynamics, formula 1 (contains results from formulas 1 & 2)
+					dv = (vleake - v[cc] + deltathe*exp((v[cc]-vth[cc])/deltathe))/taue + (ge*(erev-v[cc]) + gi*(irev-v[cc]) - wadapt[cc] + feedback_ex[cc])/C; # voltage dynamics, formula 1 (contains results from formulas 1 & 2)
 					v[cc] += dt*dv;
 					if v[cc] > vpeak	# if the voltage is higher than threshold, spike
 						spiked[cc] = true
 						counter+=1
 					end
 				else
-					dv = (vleaki - v[cc])/taui + (ge*(erev-v[cc]) + gi*(irev-v[cc]) + feedback[cc])/C; # voltage dynamics, formula 1
+					dv = (vleaki - v[cc])/taui + (ge*(erev-v[cc]) + gi*(irev-v[cc]) + feedback_inh[cc])/C; # voltage dynamics, formula 1
 					v[cc] += dt*dv;
 					if v[cc] > vth0	# if the voltage is higher than threshold, spike
 						spiked[cc] = true
@@ -295,14 +298,13 @@ function sim_force(weights::Matrix{Float64},
 			end		
 		end #end loop over cells
 		
-		
-		z = phi' * r
+		if t>RLS_delay
+			z = phi' * r
+		end
+		apprxs[tt,:].=z
 		current_sign = LKD.current_sign(tt, transcriptions, return_phone=using_phones)
 		current_signvec = LKD.sign_to_vec(current_sign, target_signs)
 		err = z - current_signvec
-		if t>RLS_delay && current_sign != "~silence~"
-			push!(accuracy_list,findmax(z)[2]==findmax(current_signvec)[2])
-		end
 
 		#RLS		
 		if learning && (t > RLS_delay) && (mod(tt,iRLS) == 0)
@@ -360,8 +362,9 @@ function sim_force(weights::Matrix{Float64},
 		end #saving states
 	end #end loop over time
 
-	@time save_network_accuracy(accuracy_list, folder)
+	@time save_network_approximants(apprxs, folder)
 	@time save_network_readout(phi,folder)
+	@time save_network_rates(rates,folder)
 	println("Done saving parameters")
 	println("spike counter total: ",counter)
 	return nothing

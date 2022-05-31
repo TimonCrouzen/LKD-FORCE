@@ -19,11 +19,11 @@ module LKD
 
     include("io.jl")
     include("parameters.jl")
+    include("force_aux")
     include("inputs.jl")
     include("sim.jl")
     include("sim_force.jl")
     include("classifiers.jl")
     include("sim_force_simplified.jl")
-    include("sim_force_plasticity.jl")
 
 end

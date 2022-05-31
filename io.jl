@@ -22,6 +22,7 @@ function makefolder(folder)
 		mkdir(joinpath(folder, "word_states"))
 		mkdir(joinpath(folder, "phone_states"))
 		mkdir(joinpath(folder, "spikes"))
+		mkdir(joinpath(folder, "rates"))
 		mkdir(joinpath(folder, "approximants"))
 		mkdir(joinpath(folder, "accuracy"))
 		mkdir(joinpath(folder, "readout"))
@@ -212,7 +213,7 @@ function read_network_readout(rd::String)
 	return BSON.load(filename)[:readout]
 end
 
-function save_network_approximants(apprs::Vector{Tuple{Vector{Float64}, Vector{Float64}}}, rd::String)
+function save_network_approximants(apprs::Matrix{Float64}, rd::String)
 	filename = abspath(rd*"/approximants/approximants.jld") #absolute path #somehow the location gets weird for this one..
 	bson(filename, approximants=apprs)
 end
@@ -236,18 +237,15 @@ end
 
 # RATES
 function save_network_rates(rates::Matrix{Float32}, rd::String)
-	filename = abspath(rd*"/spikes/rates.h5")
-	h5open(filename,"w") do fid
-		fid["rates"] = rates
-	end
+	filename = abspath(rd*"/rates/rates.jld")
+	bson(filename, rates=rates)
 end
 
 #Reads the spikes data saved in an HDF5 file in directory rd
 function read_network_rates(rd::String)
-	filename = abspath(rd*"/spikes/rates.h5")
+	filename = abspath(rd*"/rates/rates.jld")
 	@assert(isfile(filename))
-	fid = read(h5open(filename,"r"))
-	return fid["rates"]
+	return BSON.load(filename)[:rates]
 end
 
 
